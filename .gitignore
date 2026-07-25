@@ -13,9 +13,13 @@ env/
 .scrapy/
 
 # Data outputs
+# We DO version the produced brand datasets (they are the deliverable), but
+# ignore any other ad-hoc parquet dumps that land outside data/.
+/*.parquet
 data/*
 !data/.gitkeep
-*.parquet
+!data/akkerman_brands_*.parquet
+!data/akkerman_brands_latest.parquet
 
 # IDE / OS
 .idea/

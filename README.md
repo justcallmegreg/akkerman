@@ -42,7 +42,8 @@ akkerman/
 │   ├── pipelines.py          # ParquetPipeline (items -> Parquet)
 │   └── spiders/
 │       ├── quotes.py             # example spider (quotes.toscrape.com)
-│       └── akkerman_products.py  # akkermandenhaag.nl product scraper
+│       ├── akkerman_products.py  # akkermandenhaag.nl product scraper
+│       └── akkerman_brands.py    # brands available at akkermandenhaag.nl
 ├── tests/                    # offline extraction/schema tests (+ fixtures/)
 └── data/                     # output datasets (Parquet) — gitignored
 ```
@@ -58,16 +59,18 @@ make install    # create .venv and install runtime deps
 make fetch      # fetch the akkerman data → data/*.parquet
 ```
 
-`make fetch` runs the full pipeline in two stages:
+`make fetch` runs the full pipeline in three **guarded** stages, in order:
 
-1. **Category discovery** via the `akkerman_categories` spider (contributed by a
-   teammate). This step is *optional*: if that spider isn't installed on your
-   branch, `fetch` prints a note and continues — it never fails on that account.
-2. **Product crawl** via `akkerman_products`.
+1. **Category discovery** via `akkerman_categories` (collection discovery).
+2. **Brand catalogue** via `akkerman_brands`.
+3. **Product crawl** via `akkerman_products`.
+
+Every stage is *optional*: if a stage's spider isn't present on your branch,
+`fetch` prints a note and continues — it never fails on that account.
 
 By default the product stage scrapes the single example product page. Point it at
-whatever you need via variables (checked in order — `ALL`, then `COLLECTIONS`,
-then `PRODUCT_URL`):
+whatever you need via variables (checked in order — `PRODUCT_URL`, then
+`COLLECTIONS`, then `ALL`):
 
 ```bash
 make fetch                                    # the default example product
@@ -79,8 +82,9 @@ make fetch ALL=1                              # the entire store
 Run just one stage:
 
 ```bash
-make fetch-products      # products only (skip category discovery)
 make fetch-categories    # category discovery only
+make fetch-brands        # brand catalogue only
+make fetch-products      # products only (honours the selectors above)
 ```
 
 Other handy targets:
@@ -109,14 +113,16 @@ pip install -r requirements.txt
 ```bash
 scrapy list                 # show available spiders
 scrapy crawl quotes         # run the example spider
+scrapy crawl akkerman_products
+scrapy crawl akkerman_brands
 ```
 
 Output lands in `data/<spider>_<UTC-timestamp>.parquet`. Inspect it:
 
 ```python
 import pandas as pd
-df = pd.read_parquet("data/quotes_20250101T000000Z.parquet")
-print(df.head())
+df = pd.read_parquet("data/akkerman_brands_latest.parquet")
+print(df.sort_values("product_count", ascending=False).head())
 ```
 
 ## Spider: `akkerman_products` (akkermandenhaag.nl)
@@ -170,6 +176,42 @@ row = df.iloc[0]
 for v in row["variants"]:
     print(v["title"], "in stock:" , v["available"])
 ```
+
+## Spider: `akkerman_brands` (akkermandenhaag.nl)
+
+akkermandenhaag.nl is a Shopify storefront. Its product `vendor` field is always
+the shop itself ("P.W. Akkerman Den Haag"), so it is useless as a brand. The
+reliable brand signal is a **capitalised product tag** (e.g. `Montblanc`) that
+also corresponds to a storefront **collection**. The spider therefore:
+
+1. Pages through `/collections.json` to build a lookup of every collection
+   handle/title (case- and punctuation-insensitive).
+2. Pages through `/products.json` counting capitalised tags per distinct
+   spelling.
+3. Emits the tags that intersect the collection lookup as brands, choosing the
+   **most frequent spelling** as canonical (e.g. `Caran d'Ache` over the rare
+   `Caran D'ache`).
+
+Run it:
+
+```bash
+scrapy crawl akkerman_brands
+```
+
+**Output schema** (`BrandItem`) — `data/akkerman_brands_<UTC-timestamp>.parquet`
+(a stable copy is also kept at `data/akkerman_brands_latest.parquet`):
+
+| column           | type | description                                    |
+|------------------|------|------------------------------------------------|
+| `brand`          | str  | canonical brand display name                   |
+| `handle`         | str  | matching collection handle (slug)              |
+| `collection_url` | str  | absolute URL to the brand's collection page    |
+| `product_count`  | int  | number of products tagged with this brand      |
+| `scraped_at`     | str  | ISO 8601 UTC timestamp of the crawl            |
+| `source`         | str  | source domain (`akkermandenhaag.nl`)           |
+
+The latest run captured **50 brands** across ~3,900 products (top brands:
+Montblanc, Lamy, Kaweco, Parker, Caran d'Ache).
 
 ## Adding a New Crawler
 
