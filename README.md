@@ -40,7 +40,8 @@ akkerman/
 │   ├── items.py              # structured output schema(s)
 │   ├── pipelines.py          # ParquetPipeline (items -> Parquet)
 │   └── spiders/
-│       └── quotes.py         # example spider (quotes.toscrape.com)
+│       ├── quotes.py                # example spider (quotes.toscrape.com)
+│       └── akkerman_categories.py   # Akkerman Den Haag product categories
 ├── tests/                    # offline extraction/schema tests
 └── data/                     # output datasets (Parquet) — gitignored
 ```
@@ -56,8 +57,9 @@ pip install -r requirements.txt
 ## Running a Crawl
 
 ```bash
-scrapy list                 # show available spiders
-scrapy crawl quotes         # run the example spider
+scrapy list                       # show available spiders
+scrapy crawl quotes               # run the example spider
+scrapy crawl akkerman_categories  # Akkerman Den Haag product categories
 ```
 
 Output lands in `data/<spider>_<UTC-timestamp>.parquet`. Inspect it:
@@ -68,13 +70,55 @@ df = pd.read_parquet("data/quotes_20250101T000000Z.parquet")
 print(df.head())
 ```
 
+## Crawlers
+
+### `quotes` — example (quotes.toscrape.com)
+
+Reference spider showing the Item → Parquet flow. Safe to run; the target is a
+public scraping sandbox.
+
+### `akkerman_categories` — Akkerman Den Haag product categories
+
+[Akkerman Den Haag](https://akkermandenhaag.nl/) (P.W. Akkerman) is a **Shopify**
+storefront, where **product categories are modelled as Shopify _collections_**.
+Rather than scrape brittle rendered navigation HTML, this spider reads the
+public `/collections.json` storefront endpoint (paginated via
+`?limit=250&page=N`), which returns clean, typed records for *every* published
+collection.
+
+It lands the full category taxonomy (~306 categories) into
+`ProductCategoryItem` (see `akkerman/items.py`): `collection_id`, `title`,
+`handle`, `description`, `url`, `products_count`, `image`, `published_at`,
+`updated_at`, plus crawl metadata (`scraped_at`, `source_url`).
+
+```bash
+scrapy crawl akkerman_categories
+```
+
+This is intentionally a **first step**: fetching categories gives us the entry
+points (each collection's `handle`/`url`) needed to later crawl the products
+inside every category, e.g. via `…/collections/<handle>/products.json`.
+
+> **Note on access:** `akkermandenhaag.nl` is fronted by bot protection that
+> rejects the default project `USER_AGENT`. Set a browser-like UA when running
+> against the live site:
+>
+> ```bash
+> scrapy crawl akkerman_categories \
+>   -s USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+> ```
+>
+> robots.txt allows `/collections/` and does not disallow `/collections.json`,
+> so the crawl is compliant.
+
 ## Adding a New Crawler
 
 1. **Define the schema.** Add an `Item` subclass in `akkerman/items.py` listing
    the exact fields you want to land.
 2. **Write the spider.** Create `akkerman/spiders/<name>.py` with a
-   `scrapy.Spider` subclass. Set `allowed_domains`, `start_urls`, and map
-   extracted values onto your Item in `parse`.
+   `scrapy.Spider` subclass. Set `allowed_domains` and seed requests from the
+   async `start()` method (Scrapy 2.13+), or use `start_urls` for simple cases,
+   then map extracted values onto your Item in `parse`.
 3. **Crawl.** `scrapy crawl <name>` — the `ParquetPipeline` writes the results
    automatically. No extra wiring needed.
 
@@ -88,5 +132,5 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-The example spider's tests parse a static HTML fixture, so they run fully
-offline.
+The spiders' tests parse static fixtures (HTML for `quotes`, JSON for
+`akkerman_categories`), so they run fully offline.
