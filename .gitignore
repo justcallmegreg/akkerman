@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Scrapy
+.scrapy/
+
+# Data outputs
+data/*
+!data/.gitkeep
+*.parquet
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
