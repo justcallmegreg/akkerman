@@ -40,10 +40,49 @@ akkerman/
 │   ├── items.py              # structured output schema(s)
 │   ├── pipelines.py          # ParquetPipeline (items -> Parquet)
 │   └── spiders/
-│       └── quotes.py         # example spider (quotes.toscrape.com)
+│       ├── quotes.py            # example spider (quotes.toscrape.com)
+│       └── akkerman_brands.py   # brands available at akkermandenhaag.nl
 ├── tests/                    # offline extraction/schema tests
-└── data/                     # output datasets (Parquet) — gitignored
+└── data/                     # output datasets (Parquet)
 ```
+
+## Crawlers
+
+### `akkerman_brands` — brands sold at akkermandenhaag.nl
+
+akkermandenhaag.nl is a Shopify storefront. Its product `vendor` field is always
+the shop itself ("P.W. Akkerman Den Haag"), so it is useless as a brand. The
+reliable brand signal is a **capitalised product tag** (e.g. `Montblanc`) that
+also corresponds to a storefront **collection**. The spider therefore:
+
+1. Pages through `/collections.json` to build a lookup of every collection
+   handle/title (case- and punctuation-insensitive).
+2. Pages through `/products.json` counting capitalised tags per distinct
+   spelling.
+3. Emits the tags that intersect the collection lookup as brands, choosing the
+   **most frequent spelling** as canonical (e.g. `Caran d'Ache` over the rare
+   `Caran D'ache`).
+
+Run it:
+
+```bash
+scrapy crawl akkerman_brands
+```
+
+**Output schema** (`BrandItem`) — `data/akkerman_brands_<UTC-timestamp>.parquet`
+(a stable copy is also kept at `data/akkerman_brands_latest.parquet`):
+
+| column           | type | description                                    |
+|------------------|------|------------------------------------------------|
+| `brand`          | str  | canonical brand display name                   |
+| `handle`         | str  | matching collection handle (slug)              |
+| `collection_url` | str  | absolute URL to the brand's collection page    |
+| `product_count`  | int  | number of products tagged with this brand      |
+| `scraped_at`     | str  | ISO 8601 UTC timestamp of the crawl            |
+| `source`         | str  | source domain (`akkermandenhaag.nl`)           |
+
+The latest run captured **50 brands** across ~3,900 products (top brands:
+Montblanc, Lamy, Kaweco, Parker, Caran d'Ache).
 
 ## Getting Started
 
@@ -58,14 +97,15 @@ pip install -r requirements.txt
 ```bash
 scrapy list                 # show available spiders
 scrapy crawl quotes         # run the example spider
+scrapy crawl akkerman_brands
 ```
 
 Output lands in `data/<spider>_<UTC-timestamp>.parquet`. Inspect it:
 
 ```python
 import pandas as pd
-df = pd.read_parquet("data/quotes_20250101T000000Z.parquet")
-print(df.head())
+df = pd.read_parquet("data/akkerman_brands_latest.parquet")
+print(df.sort_values("product_count", ascending=False).head())
 ```
 
 ## Adding a New Crawler
@@ -73,8 +113,8 @@ print(df.head())
 1. **Define the schema.** Add an `Item` subclass in `akkerman/items.py` listing
    the exact fields you want to land.
 2. **Write the spider.** Create `akkerman/spiders/<name>.py` with a
-   `scrapy.Spider` subclass. Set `allowed_domains`, `start_urls`, and map
-   extracted values onto your Item in `parse`.
+   `scrapy.Spider` subclass. Set `allowed_domains`, map extracted values onto
+   your Item.
 3. **Crawl.** `scrapy crawl <name>` — the `ParquetPipeline` writes the results
    automatically. No extra wiring needed.
 
@@ -88,5 +128,4 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-The example spider's tests parse a static HTML fixture, so they run fully
-offline.
+All tests parse static fixtures, so they run fully offline.
