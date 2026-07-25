@@ -1,136 +1,130 @@
-# akkerman — Makefile
+# akkerman — crawler task runner
 #
-# Essential entrypoints for the crawlers. Run `make` (or `make help`) to see
-# every available command with a short description.
+# The two essential targets are:
+#   make help    show the available commands (this is the default target)
+#   make fetch   run the spiders to fetch the akkermandenhaag.nl data
 #
-# Targets are self-documenting: any target followed by a `## comment` on the
-# same line is picked up by `help` automatically, so keep those comments up to
-# date when you add commands.
+# A handful of convenience targets round things out (install, test, clean,
+# and single-stage / single-spider runs). Everything ultimately shells out to
+# `scrapy`, so it works the same as running Scrapy by hand.
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Interpreter / tooling
 # ---------------------------------------------------------------------------
+# Prefer a local virtualenv at ./.venv if present, otherwise fall back to the
+# python3 / scrapy on your PATH. Override with e.g. `make fetch PYTHON=python`.
+VENV        := .venv
+ifeq ($(wildcard $(VENV)/bin/python),)
+PYTHON      ?= python3
+SCRAPY      ?= scrapy
+else
+PYTHON      ?= $(VENV)/bin/python
+SCRAPY      ?= $(VENV)/bin/scrapy
+endif
 
-# Prefer a project virtualenv if one exists, otherwise fall back to whatever
-# `python3` / `scrapy` is on PATH. Override with e.g. `make fetch PYTHON=python`.
-VENV        ?= .venv
-VENV_PYTHON := $(VENV)/bin/python
-PYTHON      ?= $(if $(wildcard $(VENV_PYTHON)),$(VENV_PYTHON),python3)
-SCRAPY      ?= $(PYTHON) -m scrapy
+# ---------------------------------------------------------------------------
+# Spiders
+# ---------------------------------------------------------------------------
+PRODUCT_SPIDER  ?= akkerman_products
+CATEGORY_SPIDER ?= akkerman_categories
 
-# --- what `make fetch` scrapes ---------------------------------------------
-# The akkerman_products spider takes one of three inputs. `fetch` uses whichever
-# of these variables you set (checked in order), defaulting to the single
-# example product page we have been working with.
-#
-#   make fetch                                   # the default example product
-#   make fetch PRODUCT_URL=https://.../products/foo
-#   make fetch COLLECTIONS=vulpennen,potloden    # whole collection(s)
-#   make fetch ALL=1                             # the entire store
+# The specific product page we were asked to extract by default (name, price,
+# stock, description, images, and per-nib variant stock for fountain pens).
 PRODUCT_URL ?= https://akkermandenhaag.nl/collections/potloden/products/faber-castell-tafelpuntenslijper
-COLLECTIONS ?=
-ALL         ?=
+
+# Optional selectors for the product stage. First non-empty wins:
+#   ALL=1                       -> scrape the whole store
+#   COLLECTIONS=vulpennen,...    -> scrape whole collection(s)
+#   PRODUCT_URL=<url>            -> scrape a single product (default)
+ifdef ALL
+PRODUCT_ARGS := -a all=1
+else ifdef COLLECTIONS
+PRODUCT_ARGS := -a collections=$(COLLECTIONS)
+else
+PRODUCT_ARGS := -a url=$(PRODUCT_URL)
+endif
+
+# Escape hatch: run any spider with arbitrary args.
+SPIDER ?=
+ARGS   ?=
 
 .DEFAULT_GOAL := help
 
 # ---------------------------------------------------------------------------
-# Help
+# help — describe the available commands
 # ---------------------------------------------------------------------------
-
 .PHONY: help
-help: ## Show this help (list of available commands)
-	@echo "akkerman — available make commands:"
-	@echo
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-		| sort \
-		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
-	@echo
-	@echo "Config (override on the command line, e.g. make fetch ALL=1):"
-	@echo "  PYTHON      = $(PYTHON)"
-	@echo "  PRODUCT_URL = $(PRODUCT_URL)"
-	@echo "  COLLECTIONS = $(COLLECTIONS)"
-	@echo "  ALL         = $(ALL)"
+help:
+	@echo "akkerman crawler — available commands:"
+	@echo ""
+	@echo "  make help              Show this help message (default)."
+	@echo "  make fetch             Fetch the akkerman data -> data/*.parquet."
+	@echo "                         Runs category discovery (if present), then"
+	@echo "                         the product scraper."
+	@echo ""
+	@echo "  make fetch-products    Product crawl only (skip category discovery)."
+	@echo "  make fetch-categories  Category discovery only."
+	@echo "  make spiders           List available spiders."
+	@echo "  make crawl SPIDER=<name> [ARGS=...]  Run a single spider by name."
+	@echo "  make install           Create ./.venv and install runtime deps."
+	@echo "  make test              Run the offline test suite (pytest)."
+	@echo "  make clean             Remove crawled output and caches."
+	@echo ""
+	@echo "Product-stage selectors (first non-empty wins):"
+	@echo "  make fetch ALL=1                          Scrape the whole store."
+	@echo "  make fetch COLLECTIONS=vulpennen,potloden Scrape collection(s)."
+	@echo "  make fetch PRODUCT_URL=<product page url> Scrape one product."
+	@echo ""
+	@echo "Output lands in data/<spider>_<UTC-timestamp>.parquet"
 
 # ---------------------------------------------------------------------------
-# Fetching data
+# fetch — launch the spiders to fetch the data (category discovery + products)
 # ---------------------------------------------------------------------------
-#
-# `fetch` runs the full pipeline in the agreed order:
-#   1. akkerman_categories  — collection/category discovery (eniko's spider)
-#   2. akkerman_products    — per-product data (name/price/stock/desc/images/nibs)
-#
-# Category discovery is optional: if the akkerman_categories spider is not
-# installed yet, `fetch` prints a note and continues straight to products so it
-# never fails on that account.
-
+# Category discovery (teammate's akkerman_categories) is optional: it only runs
+# if that spider is available on this branch, so `fetch` never hard-fails when
+# the two branches haven't been merged yet.
 .PHONY: fetch
-fetch: ## Fetch all akkerman data: discover categories, then crawl products -> data/*.parquet
-	@if $(SCRAPY) list 2>/dev/null | grep -qx akkerman_categories; then \
-		echo "==> [1/2] discovering categories (akkerman_categories)"; \
-		$(SCRAPY) crawl akkerman_categories; \
-	else \
-		echo "==> [1/2] skipping category discovery (akkerman_categories spider not installed)"; \
-	fi
-	@echo "==> [2/2] crawling products"
-	@if [ -n "$(ALL)" ]; then \
-		echo "    whole store (all products)"; \
-		$(SCRAPY) crawl akkerman_products -a all=1; \
-	elif [ -n "$(COLLECTIONS)" ]; then \
-		echo "    collections: $(COLLECTIONS)"; \
-		$(SCRAPY) crawl akkerman_products -a collections=$(COLLECTIONS); \
-	else \
-		echo "    product: $(PRODUCT_URL)"; \
-		$(SCRAPY) crawl akkerman_products -a url=$(PRODUCT_URL); \
-	fi
-	@echo "==> done. output in ./data/"
-
-.PHONY: fetch-products
-fetch-products: ## Fetch only product data (skip category discovery)
-	@if [ -n "$(ALL)" ]; then \
-		echo "==> crawling the whole store (all products)"; \
-		$(SCRAPY) crawl akkerman_products -a all=1; \
-	elif [ -n "$(COLLECTIONS)" ]; then \
-		echo "==> crawling collections: $(COLLECTIONS)"; \
-		$(SCRAPY) crawl akkerman_products -a collections=$(COLLECTIONS); \
-	else \
-		echo "==> crawling product: $(PRODUCT_URL)"; \
-		$(SCRAPY) crawl akkerman_products -a url=$(PRODUCT_URL); \
-	fi
-	@echo "==> done. output in ./data/"
+fetch: fetch-categories fetch-products
+	@echo ">> Done. See data/*.parquet"
 
 .PHONY: fetch-categories
-fetch-categories: ## Fetch only category discovery data (akkerman_categories)
-	$(SCRAPY) crawl akkerman_categories
+fetch-categories:
+	@echo ">> Discovering product categories ($(CATEGORY_SPIDER))..."
+	@if $(SCRAPY) list 2>/dev/null | grep -qx "$(CATEGORY_SPIDER)"; then \
+		$(SCRAPY) crawl $(CATEGORY_SPIDER); \
+	else \
+		echo "   ($(CATEGORY_SPIDER) not available on this branch — skipping)"; \
+	fi
 
-.PHONY: crawl
-crawl: ## Run a single spider by name: make crawl SPIDER=<name> [ARGS="-a k=v"]
-	@test -n "$(SPIDER)" || { echo "usage: make crawl SPIDER=<name> [ARGS=\"-a k=v\"]"; exit 2; }
-	$(SCRAPY) crawl $(SPIDER) $(ARGS)
+.PHONY: fetch-products
+fetch-products:
+	@echo ">> Fetching product data ($(PRODUCT_SPIDER)) $(PRODUCT_ARGS)..."
+	$(SCRAPY) crawl $(PRODUCT_SPIDER) $(PRODUCT_ARGS)
 
+# ---------------------------------------------------------------------------
+# Convenience targets
+# ---------------------------------------------------------------------------
 .PHONY: spiders
-spiders: ## List all available spiders
+spiders:
 	$(SCRAPY) list
 
-# ---------------------------------------------------------------------------
-# Setup & quality
-# ---------------------------------------------------------------------------
+.PHONY: crawl
+crawl:
+	@test -n "$(SPIDER)" || { echo "Usage: make crawl SPIDER=<name> [ARGS=...]"; exit 2; }
+	$(SCRAPY) crawl $(SPIDER) $(ARGS)
 
 .PHONY: install
-install: ## Install runtime dependencies (creates the .venv if missing)
-	test -d $(VENV) || python3 -m venv $(VENV)
-	$(VENV_PYTHON) -m pip install --upgrade pip
-	$(VENV_PYTHON) -m pip install -r requirements.txt
-
-.PHONY: install-dev
-install-dev: install ## Install runtime + test/dev dependencies
-	$(VENV_PYTHON) -m pip install -r requirements-dev.txt
+install:
+	$(PYTHON) -m venv $(VENV)
+	$(VENV)/bin/pip install --upgrade pip
+	$(VENV)/bin/pip install -r requirements.txt
 
 .PHONY: test
-test: ## Run the offline test suite
+test:
 	$(PYTHON) -m pytest -q
 
 .PHONY: clean
-clean: ## Remove crawled output (data/*.parquet) and caches
+clean:
 	rm -f data/*.parquet
 	rm -rf .scrapy .pytest_cache
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
