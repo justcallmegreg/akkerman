@@ -31,7 +31,7 @@ Build reliable, maintainable crawlers (using [Scrapy](https://scrapy.org/)) that
 ```
 akkerman/
 ├── README.md
-├── Makefile                  # help + fetch (+ install/test/clean) shortcuts
+├── Makefile                  # help + fetch shortcuts (canonical version lands via integration branch)
 ├── requirements.txt          # runtime dependencies
 ├── requirements-dev.txt      # + test tooling
 ├── scrapy.cfg                # Scrapy project entry point
@@ -49,25 +49,22 @@ akkerman/
 
 ## Quick Start (Makefile)
 
-The `Makefile` exposes the two essential commands. Run `make` (or `make help`)
-for a self-documenting list of everything available:
+A shared `Makefile` exposes the essential commands. Run `make` (or `make help`)
+for a self-documenting list. The **canonical, multi-stage `Makefile`** is
+maintained on the integration branch (`kain/akkerman/greg`), where `fetch` runs
+all spiders in order — categories → **brands** → products — each stage guarded so
+a missing spider is skipped, not fatal:
 
 ```bash
-make            # show the command list (same as `make help`)
-make install    # create .venv and install dependencies
-make fetch      # launch the spider and fetch the brand data into data/*.parquet
+make                 # show the command list (same as `make help`)
+make install         # create .venv and install dependencies
+make fetch           # run all fetch stages (categories -> brands -> products)
+make fetch-brands    # run just the akkerman_brands spider (this task)
 ```
 
-`make fetch` runs the `akkerman_brands` spider by default. To fetch with a
-different spider, override `SPIDER`:
-
-```bash
-make fetch SPIDER=quotes
-make crawl SPIDER=<name>     # equivalent, explicit form
-```
-
-Other targets: `make spiders` (list spiders), `make test`, `make clean`,
-`make install-dev`.
+The brands stage below uses the exact `scrapy crawl akkerman_brands` command
+documented under **Running a Crawl**, so it works standalone regardless of the
+Makefile.
 
 ## Crawlers
 
@@ -89,7 +86,7 @@ also corresponds to a storefront **collection**. The spider therefore:
 Run it:
 
 ```bash
-make fetch                  # or: scrapy crawl akkerman_brands
+make fetch-brands           # or: scrapy crawl akkerman_brands
 ```
 
 **Output schema** (`BrandItem`) — `data/akkerman_brands_<UTC-timestamp>.parquet`
