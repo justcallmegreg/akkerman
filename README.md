@@ -55,10 +55,17 @@ to list them:
 ```bash
 make            # or: make help   → show all commands
 make install    # create .venv and install runtime deps
-make fetch      # fetch the akkerman product data → data/*.parquet
+make fetch      # fetch the akkerman data → data/*.parquet
 ```
 
-By default `make fetch` scrapes the single example product page. Point it at
+`make fetch` runs the full pipeline in two stages:
+
+1. **Category discovery** via the `akkerman_categories` spider (contributed by a
+   teammate). This step is *optional*: if that spider isn't installed on your
+   branch, `fetch` prints a note and continues — it never fails on that account.
+2. **Product crawl** via `akkerman_products`.
+
+By default the product stage scrapes the single example product page. Point it at
 whatever you need via variables (checked in order — `ALL`, then `COLLECTIONS`,
 then `PRODUCT_URL`):
 
@@ -67,6 +74,13 @@ make fetch                                    # the default example product
 make fetch PRODUCT_URL=https://akkermandenhaag.nl/collections/vulpennen/products/<handle>
 make fetch COLLECTIONS=vulpennen,potloden     # whole collection(s)
 make fetch ALL=1                              # the entire store
+```
+
+Run just one stage:
+
+```bash
+make fetch-products      # products only (skip category discovery)
+make fetch-categories    # category discovery only
 ```
 
 Other handy targets:
