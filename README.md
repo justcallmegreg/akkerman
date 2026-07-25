@@ -31,6 +31,7 @@ Build reliable, maintainable crawlers (using [Scrapy](https://scrapy.org/)) that
 ```
 akkerman/
 ├── README.md
+├── Makefile                  # `make help`, `make fetch`, … (see Quickstart)
 ├── requirements.txt          # runtime dependencies
 ├── requirements-dev.txt      # + test tooling
 ├── scrapy.cfg                # Scrapy project entry point
@@ -45,6 +46,41 @@ akkerman/
 ├── tests/                    # offline extraction/schema tests (+ fixtures/)
 └── data/                     # output datasets (Parquet) — gitignored
 ```
+
+## Quickstart (make)
+
+A `Makefile` wraps the essential commands. Run `make` on its own (or `make help`)
+to list them:
+
+```bash
+make            # or: make help   → show all commands
+make install    # create .venv and install runtime deps
+make fetch      # fetch the akkerman product data → data/*.parquet
+```
+
+By default `make fetch` scrapes the single example product page. Point it at
+whatever you need via variables (checked in order — `ALL`, then `COLLECTIONS`,
+then `PRODUCT_URL`):
+
+```bash
+make fetch                                    # the default example product
+make fetch PRODUCT_URL=https://akkermandenhaag.nl/collections/vulpennen/products/<handle>
+make fetch COLLECTIONS=vulpennen,potloden     # whole collection(s)
+make fetch ALL=1                              # the entire store
+```
+
+Other handy targets:
+
+```bash
+make spiders                       # list available spiders
+make crawl SPIDER=quotes           # run a single spider by name
+make crawl SPIDER=akkerman_products ARGS="-a all=1"
+make test                          # run the offline test suite
+make clean                         # remove crawled output and caches
+```
+
+The Makefile automatically uses `./.venv` if it exists; otherwise it falls back
+to `python3` on your `PATH`. Override the interpreter with `make fetch PYTHON=python`.
 
 ## Getting Started
 
@@ -108,6 +144,8 @@ scrapy crawl akkerman_products -a collections=vulpennen,potloden
 # The whole store:
 scrapy crawl akkerman_products -a all=1
 ```
+
+Or via the Makefile: `make fetch`, `make fetch COLLECTIONS=vulpennen`, `make fetch ALL=1`.
 
 Reading nib-level stock back out of the Parquet file:
 
