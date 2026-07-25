@@ -31,6 +31,7 @@ Build reliable, maintainable crawlers (using [Scrapy](https://scrapy.org/)) that
 ```
 akkerman/
 ├── README.md
+├── Makefile                  # help + fetch (+ install/test/clean) shortcuts
 ├── requirements.txt          # runtime dependencies
 ├── requirements-dev.txt      # + test tooling
 ├── scrapy.cfg                # Scrapy project entry point
@@ -45,6 +46,28 @@ akkerman/
 ├── tests/                    # offline extraction/schema tests
 └── data/                     # output datasets (Parquet)
 ```
+
+## Quick Start (Makefile)
+
+The `Makefile` exposes the two essential commands. Run `make` (or `make help`)
+for a self-documenting list of everything available:
+
+```bash
+make            # show the command list (same as `make help`)
+make install    # create .venv and install dependencies
+make fetch      # launch the spider and fetch the brand data into data/*.parquet
+```
+
+`make fetch` runs the `akkerman_brands` spider by default. To fetch with a
+different spider, override `SPIDER`:
+
+```bash
+make fetch SPIDER=quotes
+make crawl SPIDER=<name>     # equivalent, explicit form
+```
+
+Other targets: `make spiders` (list spiders), `make test`, `make clean`,
+`make install-dev`.
 
 ## Crawlers
 
@@ -66,7 +89,7 @@ also corresponds to a storefront **collection**. The spider therefore:
 Run it:
 
 ```bash
-scrapy crawl akkerman_brands
+make fetch                  # or: scrapy crawl akkerman_brands
 ```
 
 **Output schema** (`BrandItem`) — `data/akkerman_brands_<UTC-timestamp>.parquet`
