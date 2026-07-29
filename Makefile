@@ -129,6 +129,30 @@ docker-build-frontend: ## Build only the frontend Docker image
 	docker build -t akkerman-frontend:$(VERSION) -t akkerman-frontend:latest frontend
 
 # ---------------------------------------------------------------------------
+# Backend API Targets
+# ---------------------------------------------------------------------------
+
+.PHONY: run-backend
+run-backend: ## Start the Flask backend development server
+	@echo ">> Starting backend API server (development mode)"
+	cd $(BACKEND_DIR) && $(PYTHON) app.py
+
+.PHONY: test-backend
+test-backend: ## Run backend API tests
+	@echo ">> Running backend API tests"
+	cd $(BACKEND_DIR) && $(PYTHON) -m pytest test_app.py -v
+
+.PHONY: healthz
+healthz: ## Test the backend health endpoint
+	@echo ">> Checking backend health endpoint"
+	@curl -s http://localhost:5000/healthz | python3 -m json.tool || echo "Error: Backend not running on port 5000"
+
+.PHONY: install-backend
+install-backend: ## Install backend dependencies
+	@echo ">> Installing backend dependencies"
+	$(VENV)/bin/pip install -r $(BACKEND_DIR)/requirements.txt
+
+# ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
 
