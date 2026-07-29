@@ -1,26 +1,25 @@
-# Makefile for the akkerman crawler project.
+# Makefile for the Akkerman monorepo project
 #
-# The two essential targets are `help` (a self-documenting command list) and
-# `fetch` (launch the spiders to scrape the akkermandenhaag.nl data we've been
-# building). Add a new target with a `## description` comment and it shows up
-# in `help` automatically -- no manual upkeep required.
+# This Makefile orchestrates the full application stack (frontend + backend).
+# The two essential targets are `help` (self-documenting) and `fetch` (run crawlers).
+# Add a target with a `## description` comment and it auto-appears in `help`.
 #
-# `fetch` runs the full pipeline in three guarded stages, in order:
-#   1. akkerman_categories  (collection discovery -- eniko)
-#   2. akkerman_brands      (brand catalogue    -- kain)
-#   3. akkerman_products    (product details    -- greg)
-# Each stage is optional: if its spider isn't present on the current branch,
-# the stage prints a note and is skipped rather than failing the whole run.
+# Backend crawler stages (guarded):
+#   1. akkerman_categories  (collection discovery)
+#   2. akkerman_brands      (brand catalogue)
+#   3. akkerman_products    (product details)
 
 # ---------------------------------------------------------------------------
 # Configuration (override on the command line, e.g. `make fetch ALL=1`)
 # ---------------------------------------------------------------------------
-# Prefer a project virtualenv if one exists, otherwise fall back to python3.
-VENV        ?= .venv
+# Prefer a backend project virtualenv if one exists, otherwise fall back to python3.
+BACKEND_DIR ?= backend
+VENV        ?= $(BACKEND_DIR)/.venv
 PYTHON      ?= $(shell [ -x "$(VENV)/bin/python" ] && echo "$(VENV)/bin/python" || echo python3)
 SCRAPY      ?= $(PYTHON) -m scrapy
 
 DATA_DIR    ?= data
+VERSION     ?= $(shell cat VERSION.txt 2>/dev/null || echo "0.1.0")
 
 # Product-stage selectors (checked in order: PRODUCT_URL, COLLECTIONS, ALL).
 # Default (none set) crawls the example product page.
@@ -40,7 +39,7 @@ ARGS        ?=
 
 .PHONY: help
 help: ## Show this help (list of available commands)
-	@echo "akkerman crawler -- available commands:"
+	@echo "Akkerman monorepo -- available commands:"
 	@echo ""
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| sort \
@@ -57,7 +56,7 @@ help: ## Show this help (list of available commands)
 	@echo "  make fetch COLLECTIONS=vulpennen,potloden   crawl whole collection(s)"
 	@echo "  make fetch ALL=1                            crawl the entire store"
 	@echo ""
-	@echo "Config: PYTHON=$(PYTHON)  DATA_DIR=$(DATA_DIR)"
+	@echo "Config: VERSION=$(VERSION)  PYTHON=$(PYTHON)  DATA_DIR=$(DATA_DIR)"
 
 # ---------------------------------------------------------------------------
 # Fetch pipeline
@@ -73,7 +72,7 @@ fetch: ## Fetch all akkerman data: categories -> brands -> products (each guarde
 .PHONY: fetch-categories
 fetch-categories: ## Fetch only the collection-discovery data (akkerman_categories)
 	@mkdir -p $(DATA_DIR)
-	@if $(SCRAPY) list 2>/dev/null | grep -qx akkerman_categories; then \
+	@cd $(BACKEND_DIR) && if $(SCRAPY) list 2>/dev/null | grep -qx akkerman_categories; then \
 		echo ">> stage: akkerman_categories"; \
 		$(SCRAPY) crawl akkerman_categories; \
 	else \
@@ -83,7 +82,7 @@ fetch-categories: ## Fetch only the collection-discovery data (akkerman_categori
 .PHONY: fetch-brands
 fetch-brands: ## Fetch only the brand catalogue (akkerman_brands)
 	@mkdir -p $(DATA_DIR)
-	@if $(SCRAPY) list 2>/dev/null | grep -qx akkerman_brands; then \
+	@cd $(BACKEND_DIR) && if $(SCRAPY) list 2>/dev/null | grep -qx akkerman_brands; then \
 		echo ">> stage: akkerman_brands"; \
 		$(SCRAPY) crawl akkerman_brands; \
 	else \
@@ -93,7 +92,7 @@ fetch-brands: ## Fetch only the brand catalogue (akkerman_brands)
 .PHONY: fetch-products
 fetch-products: ## Fetch only the product data (akkerman_products; honours selectors)
 	@mkdir -p $(DATA_DIR)
-	@if ! $(SCRAPY) list 2>/dev/null | grep -qx akkerman_products; then \
+	@cd $(BACKEND_DIR) && if ! $(SCRAPY) list 2>/dev/null | grep -qx akkerman_products; then \
 		echo ">> skip: akkerman_products spider not present on this branch"; \
 	elif [ -n "$(PRODUCT_URL)" ]; then \
 		echo ">> stage: akkerman_products (url=$(PRODUCT_URL))"; \
@@ -110,33 +109,57 @@ fetch-products: ## Fetch only the product data (akkerman_products; honours selec
 	fi
 
 # ---------------------------------------------------------------------------
+# Docker Build Targets
+# ---------------------------------------------------------------------------
+
+.PHONY: docker-build
+docker-build: ## Build Docker images for frontend and backend
+	@echo ">> Building Docker images (version=$(VERSION))"
+	docker build -t akkerman-backend:$(VERSION) -t akkerman-backend:latest $(BACKEND_DIR)
+	docker build -t akkerman-frontend:$(VERSION) -t akkerman-frontend:latest frontend
+
+.PHONY: docker-build-backend
+docker-build-backend: ## Build only the backend Docker image
+	@echo ">> Building backend Docker image (version=$(VERSION))"
+	docker build -t akkerman-backend:$(VERSION) -t akkerman-backend:latest $(BACKEND_DIR)
+
+.PHONY: docker-build-frontend
+docker-build-frontend: ## Build only the frontend Docker image
+	@echo ">> Building frontend Docker image (version=$(VERSION))"
+	docker build -t akkerman-frontend:$(VERSION) -t akkerman-frontend:latest frontend
+
+# ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
+.PHONY: version
+version: ## Display the current version
+	@echo "Akkerman version: $(VERSION)"
 
 .PHONY: crawl
 crawl: ## Run any spider by name: make crawl SPIDER=<name> [ARGS="-a k=v"]
 	@mkdir -p $(DATA_DIR)
-	$(SCRAPY) crawl $(SPIDER) $(ARGS)
+	cd $(BACKEND_DIR) && $(SCRAPY) crawl $(SPIDER) $(ARGS)
 
 .PHONY: spiders
 spiders: ## List the available spiders
-	$(SCRAPY) list
+	@cd $(BACKEND_DIR) && $(SCRAPY) list
 
 .PHONY: install
 install: ## Create a virtualenv and install runtime dependencies
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install --upgrade pip
-	$(VENV)/bin/pip install -r requirements.txt
+	$(VENV)/bin/pip install -r $(BACKEND_DIR)/requirements.txt
 
 .PHONY: install-dev
 install-dev: install ## Install runtime + development dependencies
-	$(VENV)/bin/pip install -r requirements-dev.txt
+	$(VENV)/bin/pip install -r $(BACKEND_DIR)/requirements-dev.txt
 
 .PHONY: test
 test: ## Run the test suite
-	$(PYTHON) -m pytest -q
+	$(PYTHON) -m pytest -q --rootdir=$(BACKEND_DIR)
 
 .PHONY: clean
 clean: ## Remove caches and generated artifacts (keeps committed datasets)
-	rm -rf .scrapy .pytest_cache **/__pycache__ __pycache__
+	rm -rf $(BACKEND_DIR)/.scrapy $(BACKEND_DIR)/.pytest_cache **/__pycache__ __pycache__
 	find . -name '*.pyc' -delete
